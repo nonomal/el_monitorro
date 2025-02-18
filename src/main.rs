@@ -1,13 +1,15 @@
-use dotenv::dotenv;
+use dotenvy::dotenv;
 use el_monitorro::bot;
 use el_monitorro::config::Config;
 use fang::Queue;
 
 fn main() {
     dotenv().ok();
-    env_logger::init();
+    pretty_env_logger::init_timed();
 
-    let queue = Queue::new();
+    let queue = Queue::builder()
+        .connection_pool(el_monitorro::db::pool().clone())
+        .build();
 
     if Config::all_binaries() {
         el_monitorro::start_clean_workers(&queue);
@@ -17,5 +19,5 @@ fn main() {
 
     el_monitorro::start_scheduler(&queue);
 
-    bot::handler::Handler::start();
+    bot::update_handler::UpdateHandler::start();
 }

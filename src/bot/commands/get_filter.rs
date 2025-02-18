@@ -1,31 +1,49 @@
 use super::Command;
 use super::Message;
-use crate::bot::telegram_client::Api;
-use diesel::r2d2::ConnectionManager;
-use diesel::r2d2::Pool;
+use super::Response;
+use super::ShowFeedKeyboard;
 use diesel::PgConnection;
+use frankenstein::SendMessageParams;
+use typed_builder::TypedBuilder;
 
 static COMMAND: &str = "/get_filter";
 
-pub struct GetFilter {}
+#[derive(TypedBuilder)]
+pub struct GetFilter {
+    message: Message,
+    args: String,
+    callback: bool,
+}
 
 impl GetFilter {
-    pub fn execute(db_pool: Pool<ConnectionManager<PgConnection>>, api: Api, message: Message) {
-        Self {}.execute(db_pool, api, message);
+    pub fn run(&self) {
+        self.execute(&self.message, &format!("{} {}", Self::command(), self.args));
     }
 
-    fn get_filter(
-        &self,
-        db_connection: &PgConnection,
-        message: &Message,
-        feed_url: String,
-    ) -> String {
-        match self.find_subscription(db_connection, message.chat.id, feed_url) {
-            Err(message) => message,
-            Ok(subscription) => match subscription.filter_words {
-                None => "You did not set a filter for this subcription".to_string(),
-                Some(filter_words) => filter_words.join(", "),
-            },
+    fn get_filter(&self, db_connection: &mut PgConnection) -> Response {
+        let subscription =
+            match self.find_subscription(db_connection, self.message.chat.id, &self.args) {
+                Ok(subscription) => subscription,
+                Err(error) => return Response::Simple(error),
+            };
+
+        let response = match subscription.filter_words {
+            None => "You did not set a filter for this subcription".to_string(),
+            Some(filter_words) => filter_words.join(", "),
+        };
+
+        if self.callback {
+            self.simple_keyboard(
+                response,
+                format!(
+                    "{} {}",
+                    ShowFeedKeyboard::command(),
+                    subscription.external_id
+                ),
+                &self.message,
+            )
+        } else {
+            Response::Simple(response)
         }
     }
 
@@ -35,22 +53,15 @@ impl GetFilter {
 }
 
 impl Command for GetFilter {
-    fn response(
-        &self,
-        db_pool: Pool<ConnectionManager<PgConnection>>,
-        message: &Message,
-    ) -> String {
-        match self.fetch_db_connection(db_pool) {
-            Ok(connection) => {
-                let text = message.text.as_ref().unwrap();
-                let argument = self.parse_argument(text);
-                self.get_filter(&connection, message, argument)
-            }
-            Err(error_message) => error_message,
+    fn response(&self) -> Response {
+        match self.fetch_db_connection() {
+            Ok(mut connection) => self.get_filter(&mut connection),
+
+            Err(error_message) => Response::Simple(error_message),
         }
     }
 
-    fn command(&self) -> &str {
-        Self::command()
+    fn send_message(&self, send_message_params: SendMessageParams) {
+        self.send_message_and_remove(send_message_params, &self.message);
     }
 }

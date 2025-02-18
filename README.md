@@ -49,7 +49,11 @@ Example: /set_template https://www.badykov.com/feed.xml {{bot_feed_name}}
 
     {{bot_item_link}}
 
-Also, there is `substring` helper that can be used to limit the number of characters. For example, {{substring bot_item_description 100}}
+Also, there are some helpers for templates:
+- `substring` helper that can be used to limit the number of characters. For example, {{substring bot_item_description 100}}
+- `create_link` helper. This helper creates an html link. For example, {{create_link bot_item_name bot_item_link}} or {{create_link "custom_name" bot_item_link}}
+- `italic` helper. Usage: {{italic bot_item_description}}
+- `bold` helper. Usage:  {{bold bot_item_name}}
 
 /get_template url - get a template for the subscription
 
@@ -87,13 +91,17 @@ Available fields:
     - guid
     - description
     - author
+
+/toggle_preview_enabled - disable or enable previews
+
+/get_preview_enabled - check if previews are enabled for the current chat. by default, previews are enabled
 ```
 
 ### Common info
 
 - Feed updates check interval is 1 minute.
 - Unread items delivery interval is 1 minute.
-- The number of subscriptions is limited to 20.
+- The number of subscriptions is limited to 5 for private chats, to 1 for groups and channels
 
 The bot works in private chats, groups and channels. A couple of channels created with el monitorro:
 
@@ -162,19 +170,28 @@ All configuration is done through env variables
 |--------------------------|----------|---------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | DATABASE_URL             | yes      | --            | postgres://postgres:postgres@localhost/el_monitorro                                                                                                                                 |
 | TELEGRAM_BOT_TOKEN       | yes      | --            | 6666618370:AAGx5YhNQvUG4eUcQXN-OB_a09ZzYl6aaaa                                                                                                                                      |
-| DATABASE_POOL_SIZE       | no       | 5             | Db pool size to process user commands                                                                                                                                               |
+| DATABASE_POOL_SIZE       | no       | 5             | The maximum number of connections for global connection pool (global per binary except if ALL_BINARIES is set to true).                                                             |
 | ALL_BINARIES             | no       | --            | If this var is set, all services will be started in the main binary                                                                                                                 |
 | TELEGRAM_BOT_HANDLE      | no       | --            | This value is used during parsing of commands. If you set autocompletion menu for your bot,  the bot will understand commands like `/subscribe@handle` along with just `/subscribe` |
 | SUBSCRIPTION_LIMIT       | no       | 20            |                                                                                                                                                                                     |
+| FILTER_LIMIT             | no       | 20            | The maximum number of filter words that can be set per subscription or as the global filter                                                                                         |
 | SYNC_INTERVAL_SECONDS    | no       | 60            | The bot tries to sync feeds every `SYNC_INTERVAL_SECONDS` seconds                                                                                                                   |
 | SYNC_WORKERS_NUMBER      | no       | 1             | The number of workers to sync feeds                                                                                                                                                 |
 | DELIVER_INTERVAL_SECONDS | no       | 60            | The bot tries to deliver new feed items every `DELIVER_INTERVAL_SECONDS` seconds                                                                                                    |
 | DELIVER_WORKERS_NUMBER   | no       | 1             | The number of workers to deliver updates                                                                                                                                            |
 | CLEAN_INTERVAL_SECONDS   | no       | 3600          | The bot cleans old feed items and feeds without subscriptions every `CLEAN_INTERVAL_SECONDS` seconds                                                                                |
 | CLEAN_WORKERS_NUMBER     | no       | 1             | The number of workers to remove old data                                                                                                                                            |
-| OWNER_TELEGRAM_ID        | no       | --            | If this value is set, the bot will process commands only from the specified user id                                                                                                      |
+| OWNER_TELEGRAM_ID        | no       | --            | If this value is set, the bot will process commands only from the specified user id                                                                                                 |
 | REQUEST_TIMEOUT          | no       | 5             | Timeout in seconds for feed syncing requests                                                                                                                                        |
 | ADMIN_TELEGRAM_ID        | no       | --            | If this value is set, `/info` command with stats is available for ADMIN_TELEGRAM_ID                                                                                                 |
+
+## Deployment suggestions
+
+It's recommended to use a self hosted PostgreSQL instance but if it's not possible there are free services that can host it fo you:
+
+- https://supabase.com  500mb db, up to 60 connections
+- https://yugabyte.com, 10gb db, up to 10 connections
+- https://bit.io, 3gb
 
 ## Using docker image
 

@@ -1,26 +1,28 @@
 use super::Command;
 use super::Message;
-use crate::bot::telegram_client::Api;
+use super::Response;
 use crate::db::telegram;
-use diesel::r2d2::ConnectionManager;
-use diesel::r2d2::Pool;
 use diesel::PgConnection;
+use typed_builder::TypedBuilder;
 
 static COMMAND: &str = "/get_global_template";
 
-pub struct GetGlobalTemplate {}
+#[derive(TypedBuilder)]
+pub struct GetGlobalTemplate {
+    message: Message,
+}
 
 impl GetGlobalTemplate {
-    pub fn execute(db_pool: Pool<ConnectionManager<PgConnection>>, api: Api, message: Message) {
-        Self {}.execute(db_pool, api, message);
+    pub fn run(&self) {
+        self.execute(&self.message, Self::command());
     }
 
-    fn get_global_template(&self, db_connection: &PgConnection, message: &Message) -> String {
-        match telegram::find_chat(db_connection, message.chat.id) {
+    fn get_global_template(&self, db_connection: &mut PgConnection) -> String {
+        match telegram::find_chat(db_connection, self.message.chat.id) {
             None => "You don't have the global template set".to_string(),
             Some(chat) => match chat.template {
                 None => "You don't have the global template set".to_string(),
-                Some(value) => format!("Your global template is \n {}", value),
+                Some(value) => format!("Your global template is \n {value}"),
             },
         }
     }
@@ -31,18 +33,12 @@ impl GetGlobalTemplate {
 }
 
 impl Command for GetGlobalTemplate {
-    fn response(
-        &self,
-        db_pool: Pool<ConnectionManager<PgConnection>>,
-        message: &Message,
-    ) -> String {
-        match self.fetch_db_connection(db_pool) {
-            Ok(connection) => self.get_global_template(&connection, message),
+    fn response(&self) -> Response {
+        let response = match self.fetch_db_connection() {
+            Ok(mut connection) => self.get_global_template(&mut connection),
             Err(error_message) => error_message,
-        }
-    }
+        };
 
-    fn command(&self) -> &str {
-        Self::command()
+        Response::Simple(response)
     }
 }

@@ -1,21 +1,30 @@
+use super::Close;
 use super::Command;
+use super::Help;
 use super::Message;
-use crate::bot::telegram_client::Api;
-use diesel::r2d2::ConnectionManager;
-use diesel::r2d2::Pool;
-use diesel::PgConnection;
+use super::Response;
 use frankenstein::ChatType;
+use frankenstein::InlineKeyboardButton;
+use frankenstein::InlineKeyboardMarkup;
+use frankenstein::LinkPreviewOptions;
+use frankenstein::ReplyMarkup;
+use frankenstein::SendMessageParams;
+use typed_builder::TypedBuilder;
 
 static UNKNOWN_COMMAND_GROUP: &str = "Remove admin access from the bot in this group otherwise it will be replying to every message.";
-static UNKNOWN_COMMAND_PRIVATE: &str = "Unknown command. Use /help to show available commands";
+static UNKNOWN_COMMAND_PRIVATE: &str = "Unknown command";
 
 static COMMAND: &str = "";
 
-pub struct UnknownCommand {}
+#[derive(TypedBuilder)]
+pub struct UnknownCommand {
+    message: Message,
+    args: String,
+}
 
 impl UnknownCommand {
-    pub fn execute(db_pool: Pool<ConnectionManager<PgConnection>>, api: Api, message: Message) {
-        Self {}.execute(db_pool, api, message);
+    pub fn run(&self) {
+        self.execute(&self.message, &format!("unknown command {}", self.args));
     }
 
     pub fn command() -> &'static str {
@@ -24,43 +33,50 @@ impl UnknownCommand {
 }
 
 impl Command for UnknownCommand {
-    fn response(
-        &self,
-        _db_pool: Pool<ConnectionManager<PgConnection>>,
-        message: &Message,
-    ) -> String {
-        match message.chat.type_field {
-            ChatType::Private => UNKNOWN_COMMAND_PRIVATE.to_string(),
+    fn execute(&self, message: &Message, command: &str) {
+        if message.chat.type_field != ChatType::Channel {
+            info!("{:?} wrote: {}", message.chat.id, command);
+        }
+
+        let response = match self.message.chat.type_field {
+            ChatType::Private => Some(UNKNOWN_COMMAND_PRIVATE.to_string()),
             ChatType::Group | ChatType::Supergroup => {
-                if message.text.as_ref().unwrap().starts_with('/')
-                    || message.reply_to_message.is_some()
+                if self.message.text.as_ref().unwrap().starts_with('/')
+                    || self.message.reply_to_message.is_some()
                 {
-                    "".to_string()
+                    None
                 } else {
-                    UNKNOWN_COMMAND_GROUP.to_string()
+                    Some(UNKNOWN_COMMAND_GROUP.to_string())
                 }
             }
-            ChatType::Channel => "".to_string(),
+            ChatType::Channel => None,
+        };
+
+        if let Some(text) = response {
+            let buttons: Vec<Vec<InlineKeyboardButton>> =
+                vec![Help::button_row(), Close::button_row()];
+
+            let keyboard = InlineKeyboardMarkup::builder()
+                .inline_keyboard(buttons)
+                .build();
+
+            let preview_params = LinkPreviewOptions::builder().is_disabled(true).build();
+
+            let mut params = SendMessageParams::builder()
+                .chat_id(self.message.chat.id)
+                .text(text)
+                .reply_markup(ReplyMarkup::InlineKeyboardMarkup(keyboard))
+                .link_preview_options(preview_params)
+                .build();
+
+            params.message_thread_id = message.message_thread_id;
+
+            self.send_message(params)
         }
     }
 
-    fn execute(&self, db_pool: Pool<ConnectionManager<PgConnection>>, api: Api, message: Message) {
-        if message.chat.type_field != ChatType::Channel {
-            info!(
-                "{:?} wrote: {}",
-                message.chat.id,
-                message.text.as_ref().unwrap()
-            );
-        }
-
-        let text = self.response(db_pool, &message);
-
-        if !text.is_empty() {
-            self.reply_to_message(api, message, text);
-        }
-    }
-
-    fn command(&self) -> &str {
-        Self::command()
+    // placeholder, not used
+    fn response(&self) -> Response {
+        Response::Simple("".to_string())
     }
 }

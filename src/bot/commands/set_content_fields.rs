@@ -1,12 +1,11 @@
 use super::unknown_command::UnknownCommand;
 use super::Command;
 use super::Message;
-use crate::bot::telegram_client::Api;
+use super::Response;
 use crate::config::Config;
 use crate::db::feeds;
-use diesel::r2d2::ConnectionManager;
-use diesel::r2d2::Pool;
 use diesel::PgConnection;
+use typed_builder::TypedBuilder;
 
 static COMMAND: &str = "/set_content_fields";
 static ALLOWED_CONTENT_FIELDS: [&str; 6] = [
@@ -18,15 +17,19 @@ static ALLOWED_CONTENT_FIELDS: [&str; 6] = [
     "author",
 ];
 
-pub struct SetContentFields {}
+#[derive(TypedBuilder)]
+pub struct SetContentFields {
+    message: Message,
+    args: String,
+}
 
 impl SetContentFields {
-    pub fn execute(db_pool: Pool<ConnectionManager<PgConnection>>, api: Api, message: Message) {
-        Self {}.execute(db_pool, api, message);
+    pub fn run(&self) {
+        self.execute(&self.message, &format!("{} {}", Self::command(), self.args));
     }
 
-    pub fn set_content_fields(&self, db_connection: &PgConnection, params: String) -> String {
-        let vec: Vec<&str> = params.split(' ').collect();
+    pub fn set_content_fields(&self, db_connection: &mut PgConnection) -> String {
+        let vec: Vec<&str> = self.args.split(' ').collect();
 
         if vec.len() != 2 {
             return "Wrong number of parameters".to_string();
@@ -36,7 +39,7 @@ impl SetContentFields {
             return "Filter can not be empty".to_string();
         }
 
-        let feed = match self.find_feed(db_connection, vec[0].to_string()) {
+        let feed = match self.find_feed(db_connection, vec[0]) {
             Err(message) => return message,
             Ok(feed) => feed,
         };
@@ -63,47 +66,40 @@ impl SetContentFields {
     pub fn command() -> &'static str {
         COMMAND
     }
+
+    fn unknown_command(&self) {
+        UnknownCommand::builder()
+            .message(self.message.clone())
+            .args(self.message.text.clone().unwrap())
+            .build()
+            .run();
+    }
 }
 
 impl Command for SetContentFields {
-    fn execute(&self, db_pool: Pool<ConnectionManager<PgConnection>>, api: Api, message: Message) {
+    fn execute(&self, message: &Message, command: &str) {
         match Config::admin_telegram_id() {
-            None => UnknownCommand::execute(db_pool, api, message),
+            None => self.unknown_command(),
             Some(id) => {
                 if id == message.chat.id {
-                    info!(
-                        "{:?} wrote: {}",
-                        message.chat.id,
-                        message.text.as_ref().unwrap()
-                    );
+                    info!("{:?} wrote: {}", message.chat.id, command);
 
-                    let text = self.response(db_pool, &message);
-
-                    self.reply_to_message(api, message, text)
+                    if let Response::Simple(text) = self.response() {
+                        self.reply_to_message(message, text);
+                    }
                 } else {
-                    UnknownCommand::execute(db_pool, api, message)
+                    self.unknown_command()
                 }
             }
         }
     }
 
-    fn response(
-        &self,
-        db_pool: Pool<ConnectionManager<PgConnection>>,
-        message: &Message,
-    ) -> String {
-        match self.fetch_db_connection(db_pool) {
-            Ok(connection) => {
-                let text = message.text.as_ref().unwrap();
-                let argument = self.parse_argument(text);
-
-                self.set_content_fields(&connection, argument)
-            }
+    fn response(&self) -> Response {
+        let response = match self.fetch_db_connection() {
+            Ok(mut connection) => self.set_content_fields(&mut connection),
             Err(error_message) => error_message,
-        }
-    }
+        };
 
-    fn command(&self) -> &str {
-        Self::command()
+        Response::Simple(response)
     }
 }

@@ -1,26 +1,28 @@
 use super::Command;
 use super::Message;
-use crate::bot::telegram_client::Api;
+use super::Response;
 use crate::db::telegram;
-use diesel::r2d2::ConnectionManager;
-use diesel::r2d2::Pool;
 use diesel::PgConnection;
+use typed_builder::TypedBuilder;
 
 static COMMAND: &str = "/get_timezone";
 
-pub struct GetTimezone {}
+#[derive(TypedBuilder)]
+pub struct GetTimezone {
+    message: Message,
+}
 
 impl GetTimezone {
-    pub fn execute(db_pool: Pool<ConnectionManager<PgConnection>>, api: Api, message: Message) {
-        Self {}.execute(db_pool, api, message);
+    pub fn run(&self) {
+        self.execute(&self.message, Self::command());
     }
 
-    fn get_timezone(&self, db_connection: &PgConnection, message: &Message) -> String {
-        match telegram::find_chat(db_connection, message.chat.id) {
+    fn get_timezone(&self, db_connection: &mut PgConnection) -> String {
+        match telegram::find_chat(db_connection, self.message.chat.id) {
             None => "You don't have timezone set".to_string(),
             Some(chat) => match chat.utc_offset_minutes {
                 None => "You don't have timezone set".to_string(),
-                Some(value) => format!("Your timezone offset is {} minutes", value),
+                Some(value) => format!("Your timezone offset is {value} minutes"),
             },
         }
     }
@@ -31,18 +33,12 @@ impl GetTimezone {
 }
 
 impl Command for GetTimezone {
-    fn response(
-        &self,
-        db_pool: Pool<ConnectionManager<PgConnection>>,
-        message: &Message,
-    ) -> String {
-        match self.fetch_db_connection(db_pool) {
-            Ok(connection) => self.get_timezone(&connection, message),
+    fn response(&self) -> Response {
+        let response = match self.fetch_db_connection() {
+            Ok(mut connection) => self.get_timezone(&mut connection),
             Err(error_message) => error_message,
-        }
-    }
+        };
 
-    fn command(&self) -> &str {
-        Self::command()
+        Response::Simple(response)
     }
 }

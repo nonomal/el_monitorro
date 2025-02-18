@@ -1,36 +1,34 @@
 use super::Command;
 use super::Message;
-use crate::bot::telegram_client::Api;
+use super::Response;
 use crate::db::telegram;
-use diesel::r2d2::ConnectionManager;
-use diesel::r2d2::Pool;
 use diesel::PgConnection;
+use typed_builder::TypedBuilder;
 
 static COMMAND: &str = "/set_global_filter";
 
-pub struct SetGlobalFilter {}
+#[derive(TypedBuilder)]
+pub struct SetGlobalFilter {
+    message: Message,
+    args: String,
+}
 
 impl SetGlobalFilter {
-    pub fn execute(db_pool: Pool<ConnectionManager<PgConnection>>, api: Api, message: Message) {
-        Self {}.execute(db_pool, api, message);
+    pub fn run(&self) {
+        self.execute(&self.message, &format!("{} {}", Self::command(), self.args));
     }
 
-    fn set_global_template(
-        &self,
-        db_connection: &PgConnection,
-        message: &Message,
-        filter: String,
-    ) -> String {
-        let chat = match telegram::find_chat(db_connection, message.chat.id) {
+    fn set_global_template(&self, db_connection: &mut PgConnection) -> String {
+        let chat = match telegram::find_chat(db_connection, self.message.chat.id) {
             Some(chat) => chat,
             None => return "You don't have any subcriptions".to_string(),
         };
 
-        if filter.is_empty() {
+        if self.args.is_empty() {
             return "Filter can not be empty".to_string();
         }
 
-        let filter_words = match self.parse_filter(&filter) {
+        let filter_words = match self.parse_filter(&self.args) {
             Err(message) => return message,
             Ok(words) => words,
         };
@@ -50,22 +48,12 @@ impl SetGlobalFilter {
 }
 
 impl Command for SetGlobalFilter {
-    fn response(
-        &self,
-        db_pool: Pool<ConnectionManager<PgConnection>>,
-        message: &Message,
-    ) -> String {
-        match self.fetch_db_connection(db_pool) {
-            Ok(connection) => {
-                let text = message.text.as_ref().unwrap();
-                let argument = self.parse_argument(text);
-                self.set_global_template(&connection, message, argument)
-            }
+    fn response(&self) -> Response {
+        let response = match self.fetch_db_connection() {
+            Ok(mut connection) => self.set_global_template(&mut connection),
             Err(error_message) => error_message,
-        }
-    }
+        };
 
-    fn command(&self) -> &str {
-        Self::command()
+        Response::Simple(response)
     }
 }

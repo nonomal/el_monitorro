@@ -4,6 +4,94 @@ description = "Changelog"
 weight = 3
 +++
 
+## 0.14.0 (2024-01-13)
+
+- Docker compose  by @pxp9 in https://github.com/ayrat555/el_monitorro/pull/352
+- update rust and deps by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/353
+- fix: handle invalid publication dates by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/354
+- update frankenstein to 0.29.2 by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/355
+- Frankenstein 0.30.0 by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/356
+
+## 0.12.1 (2023-09-29)
+
+- chore(cargo): bump thiserror from 1.0.35 to 1.0.36 by @dependabot in https://github.com/ayrat555/el_monitorro/pull/268
+- Update fang from 0.9 to 0.10 by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/269
+- add BotCommand enum by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/270
+- update diesel and handlebars by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/272
+- chore(cargo): bump serde_json from 1.0.85 to 1.0.86 by @dependabot in https://github.com/ayrat555/el_monitorro/pull/273
+- Specify the postgres version when running tests by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/274
+- update rust version in the dockerfile to 1.65.0 by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/279
+- handle invalid links by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/280
+- Fix retries query for postgres 15 by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/282
+- chore(cargo): bump serde from 1.0.147 to 1.0.148 by @dependabot in https://github.com/ayrat555/el_monitorro/pull/283
+- add inline keyboard for help command by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/288
+- add command to close/remove keyboards and messages by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/289
+- support `author` in templates by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/294
+- support authors from dublincore by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/295
+- add `preview_enabled` to chats by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/296
+- feed keyboards by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/298
+- improve logs by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/299
+- Process commands in conversational style by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/301
+- CommandsKeyboard improvements by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/302
+- Display only read-only commands for feed keyboards in public chats by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/303
+- update deps by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/309
+- support topics by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/310
+- update fang by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/311
+- Compare content fields when syncronizing by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/312
+- ci(actions): bump actions/checkout from 2 to 3 by @dependabot in https://github.com/ayrat555/el_monitorro/pull/313
+- update rust version and deps by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/322
+- update rust (1.68.2) and deps by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/326
+- update frankenstein (0.25.0) by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/329
+- update aho-corasick by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/331
+- update crates by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/333
+- bump deps by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/338
+- update rust version and deps by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/339
+- update frankenstein by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/341
+- update deps by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/342
+- update rust version by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/343
+- update deps by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/345
+- update fang and frankenstein by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/347
+- update rust to 1.72 in dockerfile by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/348
+- use OnceLock from std instead of the `once_cell` crate by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/349
+- update crates by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/350
+- update frankenstein by @ayrat555 in https://github.com/ayrat555/el_monitorro/pull/351
+
+## 0.12.0 (2023-02-05)
+
+- Add inline keyboard for help command ([#288](https://github.com/ayrat555/el_monitorro/pull/288))
+- Add command to close/remove keyboards and messages ([#289](https://github.com/ayrat555/el_monitorro/pull/289))
+- Support `author` in templates ([#294](https://github.com/ayrat555/el_monitorro/pull/294))
+- Support authors from dublincore ([#295](https://github.com/ayrat555/el_monitorro/pull/295))
+- Add `preview_enabled` to chats ([#296](https://github.com/ayrat555/el_monitorro/pull/296))
+- Feed keyboards ([#298](https://github.com/ayrat555/el_monitorro/pull/298))
+- Process commands in conversational style ([#301](https://github.com/ayrat555/el_monitorro/pull/301))
+- CommandsKeyboard improvements ([#302](https://github.com/ayrat555/el_monitorro/pull/302))
+- Display only read-only commands for feed keyboards in public chats ([#303](https://github.com/ayrat555/el_monitorro/pull/303))
+- Update rust version and dependencies
+
+## 0.11.0 (2022-09-24)
+
+### Improved
+
+- Optimize filter word matching using the ahocorasick crate ([#263](https://github.com/ayrat555/el_monitorro/pull/263))
+- Configure the max number of filter words with the env var ([#264](https://github.com/ayrat555/el_monitorro/pull/264))
+- Re-use the http client for all requests ([#265](https://github.com/ayrat555/el_monitorro/pull/265))
+- Parse links along with their content   ([#266](https://github.com/ayrat555/el_monitorro/pull/266))
+
+### Fixed
+
+- Fix long links in templates ([#257](https://github.com/ayrat555/el_monitorro/pull/257))
+
+## 0.10.0 (2022-09-04)
+
+### Added
+- Add template helpers (html links, text formatting) ([#244](https://github.com/ayrat555/el_monitorro/pull/244))
+
+### Improved
+- Update diesel crate to 2.0 version. ([#247](https://github.com/ayrat555/el_monitorro/pull/247))
+- Update fang crate to 0.9.0 version. ([#247](https://github.com/ayrat555/el_monitorro/pull/247))
+- Docker push automatization. ([#239](https://github.com/ayrat555/el_monitorro/pull/239))
+
 ## 0.9.0 (2022-08-01)
 
 - Do not reply to message replies ([#219](https://github.com/ayrat555/el_monitorro/pull/219))

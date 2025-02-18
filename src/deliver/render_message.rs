@@ -1,3 +1,5 @@
+use aho_corasick::AhoCorasickBuilder;
+use aho_corasick::MatchKind;
 use chrono::offset::FixedOffset;
 use chrono::prelude::*;
 use chrono::DateTime;
@@ -8,28 +10,35 @@ use handlebars::Handlebars;
 use handlebars::JsonValue;
 use htmlescape::decode_html;
 use serde_json::value::Map;
-use typed_builder::TypedBuilder as Builder;
+use typed_builder::TypedBuilder;
 
-const UNICODE_EMPTY_CHARS: [char; 5] = ['\u{200B}', '\u{200C}', '\u{200D}', '\u{2060}', '\u{FEFF}'];
-const HTML_SPACE: &str = "&#32;";
-
-const BOT_FEED_NAME: &str = "bot_feed_name";
-const BOT_ITEM_NAME: &str = "bot_item_name";
 const BOT_DATE: &str = "bot_date";
 const BOT_FEED_LINK: &str = "bot_feed_link";
-const BOT_ITEM_LINK: &str = "bot_item_link";
+const BOT_FEED_NAME: &str = "bot_feed_name";
+const BOT_ITEM_AUTHOR: &str = "bot_item_author";
 const BOT_ITEM_DESCRIPTION: &str = "bot_item_description";
+const BOT_ITEM_LINK: &str = "bot_item_link";
+const BOT_ITEM_NAME: &str = "bot_item_name";
 
 const SUBSTRING_HELPER: &str = "substring";
+const CREATE_LINK_HELPER: &str = "create_link";
+const BOLD_HELPER: &str = "bold";
+const ITALIC_HELPER: &str = "italic";
+
 const DEFAULT_TEMPLATE: &str = "{{bot_feed_name}}\n\n{{bot_item_name}}\n\n{{bot_item_description}}\n\n{{bot_date}}\n\n{{bot_item_link}}\n\n";
-const MAX_CHARS: usize = 4000;
+const MAX_MESSAGE_CHARS: usize = 4000;
+const MAX_ITEM_CHARS: usize = 3000;
+const MAX_LINK_CHARS: usize = 1000;
 
 const RENDER_ERROR: &str = "Failed to render template";
 const EMPTY_MESSAGE_ERROR: &str = "According to your template the message is empty. Telegram doesn't support empty messages. That's why we're sending this placeholder message.";
 
+handlebars_helper!(create_link: |string: String, link: String| render_link(&string,&link));
+handlebars_helper!(bold: |string: String| format!("<b>{string}</b>"));
+handlebars_helper!(italic: |string: String| format!("<i>{string}</i>"));
 handlebars_helper!(substring: |string: String, length: usize| truncate(&string, length));
 
-#[derive(Builder)]
+#[derive(TypedBuilder)]
 pub struct MessageRenderer {
     #[builder(setter(into), default)]
     bot_feed_name: Option<String>,
@@ -43,6 +52,8 @@ pub struct MessageRenderer {
     bot_item_link: Option<String>,
     #[builder(setter(into), default)]
     bot_item_description: Option<String>,
+    #[builder(setter(into), default)]
+    bot_item_author: Option<String>,
     #[builder(setter(into), default)]
     template: Option<String>,
     #[builder(setter(into), default)]
@@ -71,6 +82,7 @@ impl MessageRenderer {
         self.maybe_set_value(&mut data, BOT_DATE, &self.date());
         self.maybe_set_value(&mut data, BOT_FEED_LINK, &self.bot_feed_link);
         self.maybe_set_value(&mut data, BOT_ITEM_LINK, &self.bot_item_link);
+        self.maybe_set_value(&mut data, BOT_ITEM_AUTHOR, &self.bot_item_author);
         self.maybe_set_value(
             &mut data,
             BOT_ITEM_DESCRIPTION,
@@ -78,7 +90,11 @@ impl MessageRenderer {
         );
 
         let mut reg = Handlebars::new();
+
         reg.register_helper(SUBSTRING_HELPER, Box::new(substring));
+        reg.register_helper(BOLD_HELPER, Box::new(bold));
+        reg.register_helper(ITALIC_HELPER, Box::new(italic));
+        reg.register_helper(CREATE_LINK_HELPER, Box::new(create_link));
 
         match reg.render_template(&template, &data) {
             Err(error) => {
@@ -92,19 +108,19 @@ impl MessageRenderer {
     fn date(&self) -> Option<String> {
         if let Some(date) = &self.bot_date {
             let time_offset = match self.offset {
-                None => FixedOffset::west(0),
+                None => FixedOffset::west_opt(0),
                 Some(value) => {
                     if value > 0 {
-                        FixedOffset::east(value * 60)
+                        FixedOffset::east_opt(value * 60)
                     } else {
-                        FixedOffset::west(-value * 60)
+                        FixedOffset::west_opt(-value * 60)
                     }
                 }
             };
 
-            let date_with_timezone = date.with_timezone(&time_offset);
+            let date_with_timezone = date.with_timezone(&time_offset.unwrap());
 
-            return Some(format!("{}", date_with_timezone));
+            return Some(format!("{date_with_timezone}"));
         }
 
         None
@@ -112,9 +128,10 @@ impl MessageRenderer {
 
     fn maybe_remove_html(&self, value_option: &Option<String>) -> Option<String> {
         if let Some(value) = value_option {
-            let without_html = remove_html(value.clone());
+            let without_html = remove_html(value);
+            let truncated = truncate(&without_html, MAX_ITEM_CHARS);
 
-            return Some(without_html);
+            return Some(truncated);
         }
 
         None
@@ -126,9 +143,10 @@ impl MessageRenderer {
         key: &str,
         value_option: &Option<String>,
     ) {
-        if let Some(value) = value_option {
-            map.insert(key.to_string(), to_json(value));
-        }
+        match value_option {
+            Some(value) => map.insert(key.to_string(), to_json(value)),
+            None => map.insert(key.to_string(), to_json("".to_string())),
+        };
     }
 }
 
@@ -137,13 +155,23 @@ pub fn render_template_example(template: &str) -> Result<String, String> {
         .bot_feed_name(Some("feed_name".to_string()))
         .bot_item_name(Some("item_name".to_string()))
         .bot_date(Some(Utc::now().round_subsecs(0)))
-        .bot_feed_link(Some("feed_link".to_string()))
-        .bot_item_link(Some("item_link".to_string()))
+        .bot_feed_link(Some("https://www.badykov.com/feed.xml".to_string()))
+        .bot_item_link(Some("https://www.badykov.com/".to_string()))
         .bot_item_description(Some("item_description".to_string()))
+        .bot_item_author(Some("Airat".to_string()))
         .template(Some(template.to_string()))
         .build();
 
     message_renderer.render()
+}
+
+fn render_link(s: &str, l: &str) -> String {
+    let value = if s.is_empty() {
+        "link".to_string()
+    } else {
+        truncate(s, MAX_LINK_CHARS)
+    };
+    format!("<a href=\"{l}\">{value}</a>")
 }
 
 fn truncate_and_check(s: &str) -> String {
@@ -152,13 +180,12 @@ fn truncate_and_check(s: &str) -> String {
         Err(_) => return RENDER_ERROR.to_string(),
     };
 
-    let truncated_result = truncate(&escaped_data, MAX_CHARS);
-    let message_without_empty_chars = remove_empty_characters(&truncated_result);
+    let truncated_result = truncate(&escaped_data, MAX_MESSAGE_CHARS);
 
-    if message_without_empty_chars.is_empty() {
+    if truncated_result.is_empty() {
         EMPTY_MESSAGE_ERROR.to_string()
     } else {
-        message_without_empty_chars
+        truncated_result
     }
 }
 
@@ -177,15 +204,18 @@ fn truncate(s: &str, max_chars: usize) -> String {
     result.trim().to_string()
 }
 
-fn remove_empty_characters(string: &str) -> String {
-    let mut result = string.to_string();
-    for character in UNICODE_EMPTY_CHARS {
-        result = result.replace(character, "");
-    }
+fn remove_html(string_with_maybe_html: &str) -> String {
+    let string_without_html = nanohtml2text::html2text(string_with_maybe_html);
 
-    result.replace(HTML_SPACE, "")
-}
+    let ac = AhoCorasickBuilder::new()
+        .match_kind(MatchKind::LeftmostFirst)
+        .build([
+            "&#32;", "&", "<", ">", "\u{200B}", "\u{200C}", "\u{200D}", "\u{2060}", "\u{FEFF}",
+        ])
+        .unwrap();
 
-fn remove_html(string_with_maybe_html: String) -> String {
-    nanohtml2text::html2text(&string_with_maybe_html)
+    ac.replace_all(
+        &string_without_html,
+        &[" ", "&amp;", "&lt;", "&gt;", " ", " ", " ", " ", " "],
+    )
 }

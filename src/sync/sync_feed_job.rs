@@ -1,6 +1,10 @@
-use crate::bot::telegram_client::Api;
+use crate::bot::telegram_client;
+use crate::bot::SimpleMessageParams;
 use crate::db;
-use crate::db::{feed_items, feeds, telegram};
+use crate::db::feed_items;
+use crate::db::feed_items::ContentHashable;
+use crate::db::feeds;
+use crate::db::telegram;
 use crate::models::feed::Feed;
 use crate::sync::reader::atom::AtomReader;
 use crate::sync::reader::json::JsonReader;
@@ -9,11 +13,12 @@ use crate::sync::reader::FeedReaderError;
 use crate::sync::reader::ReadFeed;
 use crate::sync::FetchedFeed;
 use chrono::Duration;
+use chrono::Utc;
 use diesel::pg::PgConnection;
 use diesel::result::Error;
 use fang::typetag;
-use fang::Error as FangError;
-use fang::Queue;
+use fang::FangError;
+use fang::Queueable;
 use fang::Runnable;
 use log::error;
 use serde::{Deserialize, Serialize};
@@ -34,18 +39,33 @@ pub enum FeedSyncError {
 
 impl From<Error> for FeedSyncError {
     fn from(error: Error) -> Self {
-        let msg = format!("{:?}", error);
+        let msg = format!("{error:?}");
 
         FeedSyncError::DbError { msg }
     }
 }
 
+impl From<FeedSyncError> for FangError {
+    fn from(error: FeedSyncError) -> Self {
+        let msg = format!("{error:?}");
+        FangError { description: msg }
+    }
+}
+
 #[typetag::serde]
 impl Runnable for SyncFeedJob {
-    fn run(&self, connection: &PgConnection) -> Result<(), FangError> {
-        self.sync_feed(connection);
+    fn run(&self, _queue: &dyn Queueable) -> Result<(), FangError> {
+        let mut db_connection = crate::db::pool().get()?;
 
-        Ok(())
+        self.sync_feed(&mut db_connection)
+    }
+
+    fn uniq(&self) -> bool {
+        true
+    }
+
+    fn max_retries(&self) -> i32 {
+        0
     }
 
     fn task_type(&self) -> String {
@@ -58,57 +78,52 @@ impl SyncFeedJob {
         Self { feed_id }
     }
 
-    pub fn enqueue(&self, connection: &PgConnection) -> Result<fang::Task, diesel::result::Error> {
-        Queue::push_task_query(connection, self)
-    }
-
-    pub fn sync_feed(&self, db_connection: &PgConnection) {
+    pub fn sync_feed(&self, db_connection: &mut PgConnection) -> Result<(), FangError> {
         let feed_sync_result = self.execute(db_connection);
 
         match feed_sync_result {
             Err(FeedSyncError::StaleError) => {
                 error!("Feed can not be processed for a long time {}", self.feed_id);
 
-                self.remove_feed_and_notify_subscribers(db_connection);
+                self.remove_feed_and_notify_subscribers(db_connection)?;
             }
-            Err(error) => error!("Failed to process feed {}: {:?}", self.feed_id, error),
+            Err(error) => error!("Failed to process feed {}: {error:?}", self.feed_id),
             Ok(_) => (),
-        }
+        };
+
+        Ok(())
     }
 
-    fn remove_feed_and_notify_subscribers(&self, db_connection: &PgConnection) {
-        let feed = feeds::find(db_connection, self.feed_id).unwrap();
-        let chats = telegram::find_chats_by_feed_id(db_connection, self.feed_id).unwrap();
+    fn remove_feed_and_notify_subscribers(
+        &self,
+        db_connection: &mut PgConnection,
+    ) -> Result<(), FangError> {
+        let feed = feeds::find(db_connection, self.feed_id).ok_or(FeedSyncError::DbError {
+            msg: "Feed not found :(".to_string(),
+        })?;
+        let chats = telegram::find_chats_by_feed_id(db_connection, self.feed_id)?;
 
-        let message = format!("{} can not be processed. It was removed.", feed.link);
+        let api = telegram_client::api();
 
-        let api = Api::default();
+        let message_params_builder = SimpleMessageParams::builder().message(format!(
+            "{} can not be processed. It was removed.",
+            feed.link
+        ));
 
         for chat in chats.into_iter() {
-            match api.send_text_message(chat.id, message.clone()) {
-                Ok(_) => (),
-                Err(error) => {
-                    error!("Failed to send a message: {:?}", error);
-                }
-            }
+            let message_params = message_params_builder.clone().chat_id(chat.id).build();
+
+            api.reply_with_text_message(&message_params)?;
         }
 
-        match feeds::remove_feed(db_connection, self.feed_id) {
-            Ok(_) => info!("Feed was removed: {}", self.feed_id),
-            Err(err) => error!("Failed to remove feed: {} {}", self.feed_id, err),
-        }
+        feeds::remove_feed(db_connection, self.feed_id)?;
+        Ok(())
     }
 
-    fn execute(&self, db_connection: &PgConnection) -> Result<(), FeedSyncError> {
-        let feed = match feeds::find(db_connection, self.feed_id) {
-            None => {
-                let error = FeedSyncError::FeedError {
-                    msg: format!("Error: feed not found {:?}", self.feed_id),
-                };
-                return Err(error);
-            }
-            Some(found_feed) => found_feed,
-        };
+    fn execute(&self, db_connection: &mut PgConnection) -> Result<(), FeedSyncError> {
+        let feed = feeds::find(db_connection, self.feed_id).ok_or(FeedSyncError::DbError {
+            msg: "Feed not found :(".to_string(),
+        })?;
 
         match self.read_feed(&feed) {
             Ok(fetched_feed) => self.maybe_upsert_feed_items(db_connection, feed, fetched_feed),
@@ -118,7 +133,7 @@ impl SyncFeedJob {
 
     fn maybe_upsert_feed_items(
         &self,
-        db_connection: &PgConnection,
+        db_connection: &mut PgConnection,
         feed: Feed,
         fetched_feed: FetchedFeed,
     ) -> Result<(), FeedSyncError> {
@@ -134,9 +149,15 @@ impl SyncFeedJob {
                 self.create_feed_items(db_connection, feed, fetched_feed)?;
             }
             Some(last_item_in_db) => {
-                if last_fetched_item.publication_date >= last_item_in_db.publication_date
-                    && last_fetched_item.link != last_item_in_db.link
-                {
+                let api_item_older =
+                    last_fetched_item.publication_date >= last_item_in_db.publication_date;
+
+                let db_item_in_future = last_item_in_db.publication_date > Utc::now();
+
+                let not_same_item = last_fetched_item.content_fields(&feed)
+                    != last_item_in_db.content_fields(&feed);
+
+                if (api_item_older || db_item_in_future) && not_same_item {
                     self.create_feed_items(db_connection, feed, fetched_feed)?;
                 } else {
                     self.set_synced_at(
@@ -154,7 +175,7 @@ impl SyncFeedJob {
 
     fn create_feed_items(
         &self,
-        db_connection: &PgConnection,
+        db_connection: &mut PgConnection,
         feed: Feed,
         fetched_feed: FetchedFeed,
     ) -> Result<(), FeedSyncError> {
@@ -180,19 +201,19 @@ impl SyncFeedJob {
 
     fn format_sync_error(&self, err: Error) -> Result<(), FeedSyncError> {
         error!(
-            "Error: failed to create feed items for feed with id {}: {:?}",
-            self.feed_id, err
+            "Error: failed to create feed items for feed with id {}: {err:?}",
+            self.feed_id
         );
 
         let error = FeedSyncError::DbError {
-            msg: format!("Error: failed to create feed items {:?}", err),
+            msg: format!("Error: failed to create feed items {err:?}"),
         };
         Err(error)
     }
 
     fn set_synced_at(
         &self,
-        db_connection: &PgConnection,
+        db_connection: &mut PgConnection,
         feed: Feed,
         title: String,
         description: String,
@@ -200,12 +221,12 @@ impl SyncFeedJob {
         match feeds::set_synced_at(db_connection, &feed, Some(title), Some(description)) {
             Err(err) => {
                 error!(
-                    "Error: failed to update synced_at for feed with id {}: {:?}",
-                    self.feed_id, err
+                    "Error: failed to update synced_at for feed with id {}: {err:?}",
+                    self.feed_id
                 );
 
                 let error = FeedSyncError::DbError {
-                    msg: format!("Error: failed to update synced_at {:?}", err),
+                    msg: format!("Error: failed to update synced_at {err:?}"),
                 };
 
                 Err(error)
@@ -217,7 +238,7 @@ impl SyncFeedJob {
     fn check_staleness(
         &self,
         err: FeedReaderError,
-        db_connection: &PgConnection,
+        db_connection: &mut PgConnection,
         feed: Feed,
     ) -> Result<(), FeedSyncError> {
         let created_at_or_last_synced_at = if feed.synced_at.is_some() {
@@ -239,23 +260,23 @@ impl SyncFeedJob {
 
     fn set_error(
         &self,
-        db_connection: &PgConnection,
+        db_connection: &mut PgConnection,
         feed: &Feed,
         sync_error: FeedReaderError,
     ) -> FeedSyncError {
-        match feeds::set_error(db_connection, feed, &format!("{:?}", sync_error)) {
+        match feeds::set_error(db_connection, feed, &format!("{sync_error:?}")) {
             Err(err) => {
                 error!(
-                    "Error: failed to set a sync error to feed with id {} {:?}",
-                    feed.id, err
+                    "Error: failed to set a sync error to feed with id {} {err:?}",
+                    feed.id
                 );
 
                 FeedSyncError::DbError {
-                    msg: format!("Error: failed to set a sync error to feed {:?}", err),
+                    msg: format!("Error: failed to set a sync error to feed {err:?}"),
                 }
             }
             _ => FeedSyncError::FeedError {
-                msg: format!("Error: failed to fetch feed items {:?}", sync_error),
+                msg: format!("Error: failed to fetch feed items {sync_error:?}"),
             },
         }
     }
@@ -285,35 +306,37 @@ impl SyncFeedJob {
 
 #[cfg(test)]
 mod tests {
-    use super::FeedSyncError::FeedError;
+    use super::FeedSyncError;
     use super::SyncFeedJob;
     use crate::db;
     use crate::db::{feed_items, feeds};
     use diesel::Connection;
-    use mockito::mock;
 
     #[test]
     fn it_saves_rss_items() {
         let response = std::fs::read_to_string("./tests/support/rss_feed_example.xml").unwrap();
         let path = "/feed";
-        let _m = mock("GET", path)
+        let mut server = mockito::Server::new();
+
+        let _m = server
+            .mock("GET", path)
             .with_status(200)
             .with_body(response)
             .create();
-        let link = format!("{}{}", mockito::server_url(), path);
-        let connection = db::establish_test_connection();
+        let link = format!("{}{}", server.url(), path);
+        let mut connection = db::establish_test_connection();
 
-        connection.test_transaction::<(), (), _>(|| {
-            let feed = feeds::create(&connection, link, "rss".to_string()).unwrap();
+        connection.test_transaction::<(), (), _>(|connection| {
+            let feed = feeds::create(connection, &link, "rss".to_string()).unwrap();
             let sync_job = SyncFeedJob { feed_id: feed.id };
 
-            sync_job.execute(&connection).unwrap();
+            sync_job.execute(connection).unwrap();
 
-            let created_items = feed_items::find(&connection, feed.id).unwrap();
+            let created_items = feed_items::find(connection, feed.id).unwrap();
 
             assert_eq!(created_items.len(), 9);
 
-            let updated_feed = feeds::find(&connection, feed.id).unwrap();
+            let updated_feed = feeds::find(connection, feed.id).unwrap();
             assert!(updated_feed.synced_at.is_some());
             assert!(updated_feed.title.is_some());
             assert!(updated_feed.description.is_some());
@@ -324,14 +347,14 @@ mod tests {
 
     #[test]
     fn it_returns_error_feed_is_not_found() {
-        let connection = db::establish_test_connection();
+        let mut connection = db::establish_test_connection();
         let sync_job = SyncFeedJob { feed_id: 5 };
 
-        let result = sync_job.execute(&connection);
+        let result = sync_job.execute(&mut connection);
 
         assert_eq!(
-            Err(FeedError {
-                msg: "Error: feed not found 5".to_string()
+            Err(FeedSyncError::DbError {
+                msg: "Feed not found :(".to_string()
             }),
             result
         );
