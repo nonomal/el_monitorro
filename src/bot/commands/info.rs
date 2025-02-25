@@ -1,24 +1,26 @@
 use super::unknown_command::UnknownCommand;
 use super::Command;
 use super::Message;
-use crate::bot::telegram_client::Api;
+use super::Response;
 use crate::config::Config;
 use crate::db::feeds;
 use crate::db::telegram;
-use diesel::r2d2::ConnectionManager;
-use diesel::r2d2::Pool;
 use diesel::PgConnection;
+use typed_builder::TypedBuilder;
 
 static COMMAND: &str = "/info";
 
-pub struct Info {}
+#[derive(TypedBuilder)]
+pub struct Info {
+    message: Message,
+}
 
 impl Info {
-    pub fn execute(db_pool: Pool<ConnectionManager<PgConnection>>, api: Api, message: Message) {
-        Self {}.execute(db_pool, api, message);
+    pub fn run(&self) {
+        self.execute(&self.message, Self::command());
     }
 
-    fn info(&self, db_connection: &PgConnection, _message: &Message) -> String {
+    fn info(&self, db_connection: &mut PgConnection) -> String {
         let total_feeds = match feeds::count_feeds_with_subscriptions(db_connection) {
             Ok(res) => res,
             Err(err) => {
@@ -36,9 +38,8 @@ impl Info {
         };
 
         let mut result_message = format!(
-            "the number of feeds is {}\n\
-             the number of chats is {} \n",
-            total_feeds, total_chats
+            "the number of feeds is {total_feeds}\n\
+             the number of chats is {total_chats} \n",
         );
 
         for kind in ["private", "group", "supergroup", "channel"] {
@@ -50,7 +51,7 @@ impl Info {
                 }
             };
 
-            result_message = format!("{}\n{} chats - {}", result_message, kind, result);
+            result_message = format!("{result_message}\n{kind} chats - {result}");
         }
 
         result_message
@@ -59,42 +60,40 @@ impl Info {
     pub fn command() -> &'static str {
         COMMAND
     }
+
+    fn unknown_command(&self) {
+        UnknownCommand::builder()
+            .message(self.message.clone())
+            .args(self.message.text.clone().unwrap())
+            .build()
+            .run();
+    }
 }
 
 impl Command for Info {
-    fn execute(&self, db_pool: Pool<ConnectionManager<PgConnection>>, api: Api, message: Message) {
+    fn execute(&self, message: &Message, command: &str) {
         match Config::admin_telegram_id() {
-            None => UnknownCommand::execute(db_pool, api, message),
+            None => self.unknown_command(),
             Some(id) => {
                 if id == message.chat.id {
-                    info!(
-                        "{:?} wrote: {}",
-                        message.chat.id,
-                        message.text.as_ref().unwrap()
-                    );
+                    info!("{:?} wrote: {}", message.chat.id, command);
 
-                    let text = self.response(db_pool, &message);
-
-                    self.reply_to_message(api, message, text)
+                    if let Response::Simple(text) = self.response() {
+                        self.reply_to_message(message, text)
+                    }
                 } else {
-                    UnknownCommand::execute(db_pool, api, message)
+                    self.unknown_command();
                 }
             }
         }
     }
 
-    fn response(
-        &self,
-        db_pool: Pool<ConnectionManager<PgConnection>>,
-        message: &Message,
-    ) -> String {
-        match self.fetch_db_connection(db_pool) {
-            Ok(connection) => self.info(&connection, message),
+    fn response(&self) -> Response {
+        let response = match self.fetch_db_connection() {
+            Ok(mut connection) => self.info(&mut connection),
             Err(error_message) => error_message,
-        }
-    }
+        };
 
-    fn command(&self) -> &str {
-        Self::command()
+        Response::Simple(response)
     }
 }

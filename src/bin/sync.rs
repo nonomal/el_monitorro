@@ -1,11 +1,13 @@
-use dotenv::dotenv;
+use dotenvy::dotenv;
 use fang::Queue;
 
 fn main() {
     dotenv().ok();
-    env_logger::init();
+    pretty_env_logger::init();
 
-    let queue = Queue::new();
+    let queue = Queue::builder()
+        .connection_pool(el_monitorro::db::pool().clone())
+        .build();
 
     el_monitorro::start_sync_workers(&queue);
 

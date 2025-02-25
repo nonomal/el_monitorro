@@ -1,9 +1,9 @@
 use crate::schema::telegram_chats;
 use chrono::{DateTime, Utc};
 
-#[derive(Queryable, Identifiable, Debug)]
-#[table_name = "telegram_chats"]
-#[primary_key(id)]
+#[derive(Queryable, Identifiable, Debug, Clone)]
+#[diesel(table_name = telegram_chats)]
+#[diesel(primary_key(id))]
 pub struct TelegramChat {
     pub id: i64,
     pub kind: String,
@@ -16,4 +16,6 @@ pub struct TelegramChat {
     pub utc_offset_minutes: Option<i32>,
     pub template: Option<String>,
     pub filter_words: Option<Vec<String>>,
+    pub preview_enabled: bool,
+    pub command: Option<String>,
 }

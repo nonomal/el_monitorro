@@ -16,13 +16,13 @@ impl ReadFeed for AtomReader {
                 let mut feed = FetchedFeed::from(atom_feed);
 
                 if feed.link.is_empty() {
-                    feed.link = self.url.clone();
+                    feed.link.clone_from(&self.url);
                 }
 
                 Ok(feed)
             }
             Err(err) => {
-                let msg = format!("{}", err);
+                let msg = format!("{err}");
                 Err(FeedReaderError { msg })
             }
         }
@@ -38,7 +38,7 @@ impl From<AtomFeed> for FetchedFeed {
         let mut items = feed
             .entries()
             .iter()
-            .filter(|item| item.links().first().is_some())
+            .filter(|item| !item.links().is_empty())
             .map(|item| {
                 let base_date = match item.published() {
                     None => Some(item.updated()),
